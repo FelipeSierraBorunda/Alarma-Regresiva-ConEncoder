@@ -244,4 +244,4 @@ void app_main(void)
 		BtnBlancoPresionado=0;
     }
   }
-  //cod
+  //cod actualizado
