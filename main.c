@@ -22,15 +22,12 @@ typedef enum {
 #define Seg_e GPIO_NUM_23
 #define Seg_f GPIO_NUM_4
 #define Seg_g GPIO_NUM_15
-#define Seg_dp GPIO_NUM_16
 // Definir pines de los cátodos (para multiplexado)
-#define Catodo_0 GPIO_NUM_4
-#define Catodo_1 GPIO_NUM_2
 #define Catodo_2 GPIO_NUM_19
 #define Catodo_3 GPIO_NUM_21
 // Definir pines de los pulsadores
-#define BtnAzul GPIO_NUM_33
-#define BtnRojo GPIO_NUM_35
+#define BtnA GPIO_NUM_33
+#define BtnB GPIO_NUM_32
 #define BtnBlanco GPIO_NUM_32
 // Matriz de segmentos para los dígitos 0-9
 uint8_t Digitos[][7] = {
@@ -47,8 +44,6 @@ uint8_t Digitos[][7] = {
 };
 //Apagar
 void ApagarDisplays(void){
-    gpio_set_level(Catodo_0, 1);	
-    gpio_set_level(Catodo_1, 1);
     gpio_set_level(Catodo_2, 1);
     gpio_set_level(Catodo_3, 1);
 }
@@ -61,6 +56,27 @@ void AsignarSegmentos(uint8_t BCD_Value){
 	gpio_set_level(Seg_f, Digitos[BCD_Value][5]);
 	gpio_set_level(Seg_g, Digitos[BCD_Value][6]);
 }
+//================================================== interrupcion ==================================================
+volatile int estado_anterior_A = 0;  // Estado anterior de A
+volatile int direccion = 0;  // 1 = horario, -1 = antihorario, 0 = sin movimiento
+
+// ISR para detectar dirección de giro
+static void IRAM_ATTR encoder_isr_handler(void* arg) {
+    int estado_A = gpio_get_level(BtnA);
+    int estado_B = gpio_get_level(BtnB);
+
+    if (estado_A != estado_anterior_A) {  // Cambio detectado en A
+        if (estado_A == estado_B) {
+            direccion = 1;  // Giro horario
+        } else {
+            direccion = -1;  // Giro antihorario
+        }
+    }
+
+    estado_anterior_A = estado_A;  // Actualizar estado de A
+}
+
+
 //================================================== Main ==========================================================
 void app_main(void)
 {
@@ -69,8 +85,7 @@ void app_main(void)
     gpio_config_t ConfiguracionDeLasSalidas = {
         .pin_bit_mask = (1ULL << Seg_a | 1ULL << Seg_b | 1ULL << Seg_c | 
                          1ULL << Seg_d | 1ULL << Seg_e | 1ULL << Seg_f | 
-                         1ULL << Seg_g | 1ULL << Catodo_0 | 1ULL << Catodo_1 | 
-                         1ULL << Catodo_2 | 1ULL << Catodo_3),
+                         1ULL << Seg_g | 1ULL << Catodo_2 | 1ULL << Catodo_3),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -80,24 +95,16 @@ void app_main(void)
 
     // Configuración de entradas
     gpio_config_t ConfiguracionDeLasEntradas = {
-        .pin_bit_mask = (1ULL << BtnAzul | 1ULL << BtnRojo | 1ULL << BtnBlanco),
+        .pin_bit_mask = (1ULL << BtnA | 1ULL << BtnB | 1ULL << BtnBlanco),
         .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        .intr_type = GPIO_INTR_DISABLE
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_ANYEDGE //dETECTAR CAMBIO DE ESTADO
     };
     gpio_config(&ConfiguracionDeLasEntradas);
     ApagarDisplays();
      printf("Iniciando el Programa...\n");
     // =============================================== VARIABLES DE CONTROL ==========================================
-    // Guarda el estado actual del boton
-    int EstadoActualBtnAzul,EstadoActualBtnRojo,EstadoActualBtnBlanco;
-    // Guarda el estado anterior del boton
-    int EstadoAnteriorBtnAzul=0;
-    int EstadoAnteriorBtnRojo=0;
-    int EstadoAnteriorBtnBlanco=0;
-    // Variable que indica que se presiono el boton
-    int BtnAzulPresionado,BtnRojoPresionado,BtnBlancoPresionado;
     //Variables para cifras
     uint8_t Display, Unidades, Decenas;
     int Cuenta, Residuo;
@@ -105,10 +112,13 @@ void app_main(void)
     //Variable que acumula la cuenta
     Cuenta = 0;
     //Variable que dice en que display 
-    Display = 0;			
-    //Empieza con el estado inicial
-	TIPODEESTADO ESTADOACTUAL = INICIAL; // Estado inicial
-	TIPOPAUSA TIPODEPAUSA=PROGRESIVA;		
+    Display = 0;		
+    //==================================================== Interrupcion	============================================
+    // Leer estado inicial de A
+    estado_anterior_A = gpio_get_level(BtnA);
+	// Configurar interrupción en A
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(BtnA, encoder_isr_handler, NULL);
    // ===================================================== FIN =====================================================   
     while (true) 
     {
@@ -118,10 +128,6 @@ void app_main(void)
     	Residuo = Cuenta%10;
     	Unidades = Residuo%10;
         ApagarDisplays();
-        //Leemos el estado de los pulsadores
-        EstadoActualBtnAzul = gpio_get_level(BtnAzul);
-        EstadoActualBtnRojo = gpio_get_level(BtnRojo);
-        EstadoActualBtnBlanco = gpio_get_level(BtnBlanco);
         //Asigna la cifra al display
     	switch(Display){
     		case 0:
@@ -138,110 +144,32 @@ void app_main(void)
     	//Solo existen 2 display, cuando llegue al segundo, se reinicia
     	Display &= 1;
     	// ============================================= Contador de  milisegundos  ================================
+    	
     	//El retraso entre cada cambio de display
         vTaskDelay(1 / portTICK_PERIOD_MS);
         //Contamos cuantos milisegundos estan pasando
         MilisAcum++;
-        // =================================== Detecta si se presiona un boton =====================================
-        if (EstadoAnteriorBtnAzul==1 && EstadoActualBtnAzul==0)
-        {
-			BtnAzulPresionado=1;
-		}
-		if (EstadoAnteriorBtnRojo==1 && EstadoActualBtnRojo==0)
-        {
-			BtnRojoPresionado=1;
-		}
-		if (EstadoAnteriorBtnBlanco==1 && EstadoActualBtnBlanco==0)
-        {
-			BtnBlancoPresionado=1;
-		}
-        // =================================== Comportamiento de cada boton ===========================================
-        if (BtnAzulPresionado == 1) 
-            {  
-                if (ESTADOACTUAL == INICIAL || ESTADOACTUAL == PAUSA) 
-                {
-                    ESTADOACTUAL = PROGRESIVO;
-                } 
-                else if (ESTADOACTUAL == PROGRESIVO) 
-                {
-                    ESTADOACTUAL = PAUSA;
-                    TIPODEPAUSA = PROGRESIVA;
-                }
-            }
-          else if (BtnRojoPresionado==1)
-          {  
-                if (ESTADOACTUAL == FINAL ||ESTADOACTUAL == PAUSA) 
-                {
-                    ESTADOACTUAL = REGRESIVO;
-                } 
-                else if (ESTADOACTUAL == REGRESIVO) 
-                {
-                    ESTADOACTUAL = PAUSA;
-                    TIPODEPAUSA = REGRESIVA;
-                }
-		  }
-		  else if (BtnBlancoPresionado==1)
-          {  
-                if (ESTADOACTUAL == PAUSA) 
-            	{
-					if(TIPODEPAUSA == PROGRESIVA )
-					{
-						ESTADOACTUAL = INICIAL;
-					}
-					else if (TIPODEPAUSA == REGRESIVA)
-					{
-						ESTADOACTUAL = FINAL;
-					}
-				}
-		  }
+
+        
         // =================================== Realiza el cambio en el display y cuenta el tiempo
 		if (MilisAcum==500)
 		{
+			
+			 if (direccion == 1) {
+            printf("Sentido horario\n");
+            Cuenta=Cuenta+1;
+        } else if (direccion == -1) {
+            printf("Sentido antihorario\n");
+            Cuenta=Cuenta-1;
+        }
+
+        direccion = 0;  // Resetear dirección después de imprimir
 			MilisAcum = 0;
-			if(ESTADOACTUAL==PAUSA)
-			{
-					Cuenta = Cuenta;
-			}
-			else if (ESTADOACTUAL==PROGRESIVO)
-			{
-					if (Cuenta==99){
-						Cuenta= Cuenta;
-						ESTADOACTUAL = FINAL;
-					}else{
-						Cuenta =Cuenta+1;
-					}
-			}
-			else if(ESTADOACTUAL==REGRESIVO)
-			{
-					if (Cuenta==0){ Cuenta= Cuenta;	ESTADOACTUAL = INICIAL;
-					}else{
-						Cuenta =Cuenta-1;
-					}
-			}
-			else if(ESTADOACTUAL==INICIAL)
-			{
-					Cuenta = 0;
-			}
-			else if(ESTADOACTUAL==FINAL)
-			{
-					Cuenta = 99;
-			}
+			Cuenta = Cuenta;
 			// ================================================ Impresion de datos
-			printf("==============================\n");
 			printf("El numero es: %d\n", Cuenta);
-			printf("El boton azul: %d\n", EstadoActualBtnAzul);
-			printf("El boton rojo: %d\n", EstadoActualBtnRojo);
-			printf("El boton blanco: %d\n", EstadoActualBtnBlanco);
-			printf("ESTADO: %d\n", ESTADOACTUAL);
 		}
-		// ===================================== Se establece el estado anterior para el siguiente ciclo
-		EstadoAnteriorBtnAzul=EstadoActualBtnAzul;
-		EstadoAnteriorBtnRojo=EstadoActualBtnRojo;
-		EstadoAnteriorBtnBlanco=EstadoActualBtnBlanco;
-		// Se reinicia el estado de los botones
-		BtnAzulPresionado=0;
-		BtnRojoPresionado=0;
-		BtnBlancoPresionado=0;
+		
     }
   }
   //cod actualizado
