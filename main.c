@@ -47,34 +47,32 @@ void AsignarSegmentos(uint8_t BCD_Value){
 	gpio_set_level(Seg_g, Digitos[BCD_Value][6]);
 }
 //================================================== interrupcion ==================================================
-volatile int estado_anterior_A = 0;  // Estado anterior de A
 volatile int direccion = 0;  // 1 = horario, -1 = antihorario, 0 = sin movimiento
-volatile bool btn_presionado = false;  // Variable para controlar el estado de Btn
 volatile int Cuenta = 0;  // 1 = horario, -1 = antihorario, 0 = sin movimiento
 // ISR para detectar dirección de giro
 static void IRAM_ATTR encoder_isr_handler(void* arg) {
     int estado_A = gpio_get_level(BtnA);
     int estado_B = gpio_get_level(BtnB);
-    	if (estado_A == estado_B) {
-            direccion = 1;  // Giro horario
-            if (Cuenta<99){
-					Cuenta=Cuenta+1;
+    	if (estado_A == estado_B) 
+    	{		
+				direccion = -1;  // Giro antihorario
+                if (Cuenta>0){
+           		Cuenta=Cuenta-1;
 				}
 				else{Cuenta=Cuenta;}
         } 
         else {
-            direccion = -1;  // Giro antihorario
-              if (Cuenta>0){
-           		Cuenta=Cuenta-1;
+               direccion = 1;  // Giro horario
+            	if (Cuenta<99){
+					Cuenta=Cuenta+1;
 				}
 				else{Cuenta=Cuenta;}
         }
-    estado_anterior_A = estado_A;  // Actualizar estado de A
 }
 // ISR para detectar cuando se presiona Btn
 static void IRAM_ATTR btn_isr_handler(void* arg) 
 {
-    btn_presionado = true;  // Marcamos que el botón ha sido presionado
+  
 }
 //================================================== Main ==========================================================
 void app_main(void)
@@ -102,28 +100,22 @@ void app_main(void)
         .intr_type = GPIO_INTR_NEGEDGE //dETECTAR CAMBIO DE ESTADO
     };
     gpio_config(&ConfiguracionDeLasEntradas);
-    ApagarDisplays();
-     printf("Iniciando el Programa...\n");
     // =============================================== VARIABLES DE CONTROL ==========================================
     //Variables para cifras
     uint8_t Display, Unidades, Decenas;
-    int  Residuo;
-    int MilisAcum = 0;
-    int MilisAcumLed=0;
-    gpio_set_level(LedRojo, 1);  // Encender LED 
+    int  Residuo; 
+    //Pagardisplay 
+     ApagarDisplays();
     //Variable que acumula la cuenta
     Cuenta = 0;
     //Variable que dice en que display 
     Display = 0;		
     //==================================================== Interrupciones ============================================
-    // Leer estado inicial de A
-    estado_anterior_A = gpio_get_level(BtnA);
 	// Configurar interrupción en A
     gpio_install_isr_service(0);
     gpio_isr_handler_add(BtnA, encoder_isr_handler, NULL);
     // Configurar interrupción en Btn
-    gpio_isr_handler_add(Btn, btn_isr_handler, NULL);
-   // ===================================================== FIN =====================================================   
+    gpio_isr_handler_add(Btn, btn_isr_handler, NULL);   
     while (true) 
     {
 		// =============================================== LOGICA DEL DISPLAY =======================================
@@ -147,47 +139,8 @@ void app_main(void)
     	Display++;
     	//Solo existen 2 display, cuando llegue al segundo, se reinicia
     	Display &= 1;
-    	// ============================================= Contador de  milisegundos  ================================
-    	
-    	//El retraso entre cada cambio de display
+    	// ============================================= Delay  ===================================================
         vTaskDelay(1 / portTICK_PERIOD_MS);
-        //Contamos cuantos milisegundos estan pasando
-        MilisAcum++;
-        
-        // ========================================== Led ========================================
-         if (btn_presionado)
-         {
-            printf("Botón presionado!\n");
-            gpio_set_level(LedVerde, 1);  // Encender LED Verde
-            btn_presionado = false;  // Resetear el estado del botón
-            MilisAcumLed++;
-        }
-        else if ( MilisAcumLed==3000)
-         {
-            gpio_set_level(LedVerde, 0);  // Apagar LED Verde
-            btn_presionado = false;  // Resetear el estado del botón
-            MilisAcumLed=0;
-        }
-        // =================================== Realiza el cambio en el display y cuenta el tiempo
-		if (MilisAcum==100)
-		{
-			if (direccion == 1) 
-			{
-            printf("Sentido horario\n");
-	           
-       		 }
-			else if (direccion == -1) 
-			{
-            printf("Sentido antihorario\n");
-            
-		    }
-        	direccion = 0;  // Resetear dirección después de imprimir
-			MilisAcum = 0;
-			// ================================================ Impresion de datos
-			printf("El numero es: %d\n", Cuenta);
-		}
-		// Accion al presionar el botón Btn
-       
     }
   }
   
