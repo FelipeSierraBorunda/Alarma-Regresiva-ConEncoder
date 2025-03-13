@@ -53,6 +53,7 @@ int  Residuo;
 bool EstadoRegresivo = false;
 volatile int direccion = 0;  // 1 = horario, -1 = antihorario, 0 = sin movimiento
 volatile int Cuenta = 0;  // 1 = horario, -1 = antihorario, 0 = sin movimiento
+volatile int CuentaBuzzer = 0;  // 1 = horario, -1 = antihorario, 0 = sin movimiento
 //================================================== Funciones  ====================================================
 //================================================== Logica del display
 void actualizar_display()
@@ -79,17 +80,6 @@ void actualizar_display()
 	//Solo existen 2 display, cuando llegue al segundo, se reinicia
 	Display &= 1;
 }
-//================================================== Logica del del Alarma Regresiva
-void CuentaRegresiva()
-{
-       if(Cuenta==0)
-		{
-		Cuenta=1;
-		} 
-		else{
-		Cuenta=Cuenta-1;
-		}
-}
 //================================================== interrupciones =================================================
 //================================================== Display
 // ISR para detectar dirección de giro
@@ -115,25 +105,56 @@ static bool IRAM_ATTR ActualizacionDelDisplay(gptimer_handle_t timer, const gpti
 	actualizar_display();
 	return (high_task_awoken == pdTRUE); 		
 }
-//================================================== Boton y alarma regresiva
+//================================================== Boton y estado regresivo
 static void IRAM_ATTR btn_isr_handler(void* arg) 
 {
-  	gptimer_handle_t timeralarma = (gptimer_handle_t) arg;
-	//gpio_isr_handler_remove(Btn);
+ 	gptimer_handle_t timeralarma = (gptimer_handle_t) arg;
+ 	gpio_isr_handler_remove(Btn);
+	if(EstadoRegresivo==false){
+	gpio_isr_handler_remove(BtnA);
 	gpio_set_level(LedRojo, 0);
 	gpio_set_level(LedVerde, 1);
-	EstadoRegresivo = true;		
-	//gpio_set_level(Buzzer, 1);									
+	EstadoRegresivo = true;											
 	gptimer_set_raw_count(timeralarma, 0);			
 	gptimer_start(timeralarma);
+	}
+	else if(EstadoRegresivo==true)
+	{
+		gpio_set_level(LedRojo, 1);
+		gpio_set_level(LedVerde, 0);
+		gptimer_stop(timeralarma);
+		gpio_isr_handler_add(BtnA, encoder_isr_handler, NULL);
+		gpio_isr_handler_add(Btn, btn_isr_handler,timeralarma);
+		EstadoRegresivo=false;
+	}
 
 }
 // Interrupcion de Actualizacion de alarma
 static bool IRAM_ATTR InterrupcionCuentaAbajo(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data){
 	BaseType_t high_task_awoken = pdFALSE;
- 	CuentaRegresiva();
- 	if(Cuenta==0){
+ 	if(Cuenta==0)
+ 	{
+		if(CuentaBuzzer==6)
+		{
+		CuentaBuzzer=0;
+		Cuenta=1;
+		EstadoRegresivo=false;
+		gpio_set_level(LedRojo, 1);
+		gpio_set_level(LedVerde, 0);
+		gpio_set_level(Buzzer, 0);
 		gptimer_stop(timer);
+		gpio_isr_handler_add(BtnA, encoder_isr_handler, NULL);
+		}
+		else
+		{
+		gpio_set_level(Buzzer, 1);
+		CuentaBuzzer=CuentaBuzzer+1;
+		}
+		gpio_isr_handler_add(Btn, btn_isr_handler,(void*)timer);
+	}
+	else{
+		Cuenta=Cuenta-1;
+		gpio_isr_handler_add(Btn, btn_isr_handler,(void*)timer);
 	}
 	return (high_task_awoken == pdTRUE); 		
 }
